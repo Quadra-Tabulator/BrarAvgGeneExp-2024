@@ -1,0 +1,73 @@
+ARRAY job or splitting the FASTQ's into smaller fragments (multiple folders)
+
+4-25-2024 3:30 PM: Working so far, but there are issues with making the temp dir. I think b/c it already exists. (STAR_SK_STARtmp/)
+    Deleting it and retrying...
+" " 4:11 PM: This does not seem to fix it. There are a few slurm.outs that give a "failed reading from temp file" error.
+    https://www.biostars.org/p/9575297/ This solution (sorting files after align) could work.
+    OR split them into 2 folders and run it that way. (8 and 8 hours? 9 and 9 hours?)
+" " 4:12 PM: Will try splitting first. Let's take all the .fastq files and split them into Sc_fastqA and Sc_fastqB directories.
+" " 7:02 PM: Successfully splitted. Let's figure out how to change the output directory. (Or maybe it just spits only two out, since there are two Star align operations)
+    Or at least figure out how to change which directory to read from (i think for file in *./Sc...whatever/fastq). But will it spit it out into the A/B directories, or in the main Brar one?
+" " 8:37 PM: --outFileNamePrefix contains /path/to/output/dir/prefix.
+    Since the sbatches run INSIDE the Sc_fastqA folders, it might be fine to leave them in ./, and they might output them in the A and B folders.
+    STAR outputs:
+        Log.out files
+        **BAM format (default: Unsorted)**
+        Splice junctions (SJ.out.tab)
+    I should only need the BAM unsorted item, as only that is required in ht-seq
+" " 8:44 PM: If doesn't work, check if genomeDir as STAR_index is insufficient. Perhaps I must type it as a file path.
+    --genomeDir ../STAR_index
+    ...if the sbatch really stays within the folders that are specified in "file in ../Sc_fastq[A or B]"
+    ...If I can just refer to the folder (i.e. the sbatch still acts within the Brar project, then I can use --genomeDir ./STAR_index
+" " 9:14 PM: --genomeDir ./STAR_index works in the test. No errors. Let's let the ScA and ScB run with this argument.
+" " 11:19 PM: --outTmpDir in STAR Array. Seems to not work... ScA and ScB are still running
+
+4-26-2024 12:23 AM: The ScA and ScB are still going strong. This method is more robust and is based on stuff I already know.
+" " 11:23 AM: Unsorted. I accidentally left it on SortedByCoordinate. Running A, B, and ARRAY again.
+" " 3:22 PM: Unsorted STAR_SKAligned.out.bam from array has nothing. It's 0MB. More temp file errors. Hope A and B work...
+" " 6:14 PM: I DON'T ACTUALLY NEED 70 SRR'S/FASTQ FILES. I only need 12. the "mRNA-seq... traditional timecourse" ones. Only traditional time course. We can say that after discussion with my PI, it would be more appropriate to use the traditional time course only, and not also ndt80.
+
+4-27-2024 12:50 AM: The final STAR_Sc_12.sbatch is working very well. It got through 11 of the 12 files. 4 hours was just shy of what it needed. Running one more time overnight, with 6 hours and more resources.
+" " 8:42 AM: The STAR finished. But I am getting an error on htseq. Fixing... (Made index file via samtools. Need to fix the error of .gff apparently lacking a "gene_id" attribute)
+    Idea 1: Try converting from GTF to GFF. Or seeing if GFF includes some kind if 'gene id' column that GFF lacks.
+    Idea 2: Try finding a way to specify for the program a gene id or adding gene id or something.
+    It seems that the gene_id is just the type?
+" " 2:32 PM: OKAY, I figured it out. I just had to use Idea 2 and specify that gene ID in GFF files is in the last column. There was an ht-seq argument for that. Moving on to Offline RStudio.
+
+-----OFFLINE R-STUDIO--------
+
+4-27-2024 5:49 PM: Going good so far. Obtained gene NAMES. The ID and Names (And parents) were put in the same 9th column of the .gff file ($annotations in the dataframe once i imported it)
+		Also obtained gene ID's, which I suspect I will require later to match up the gene count with their names. Might not need to use the crazy database joining stuff, but I simply might have to take the whole unsorted GeneNames and put it into the Counts dataframe as a new column.
+" " 7:01 PM: Okay, seems like I need to use the ones with "Parent=" too. Not just the Names, as those will return no results...
+		The parents are gene ID's that seem to connect other segments of a feature to the original one. As a lot of genomic features are discontinuous.
+May have to separate the GFF out into chromosomes first. There are chromosomes 1 to 16.
+Because I have to find the regions that match the regions (i.e. start and end columns) of the three regions. for each chromosome
+
+4-28-2024 1:59 PM: Merged data now has everything: GFF, counts, and Name/Parents added on too.
+Due to the nature of the data, a lot of rows are left blank. But if need be,
+I can probably port the merged_data$Gene_Name back over to count_data for only
+those rows who actually have count_data values.
+
+Next up:
+-Find the genes that fit within the pericentromeres, subtelomeres, and ribosomal.
+Pericentromeres will be hardest, as I need to figure out how to find the CEN (probably ~ the center). But it's just one region per chromosome.
+Subtelomeres should be easiest, as I just have to find those within the first 20k and the last 20k on each of the 16 chromosomes (32 total)
+Ribosomal DNA should be about middle difficulty. Find where the rDNA locus is on chromosome XII (12) of Sc SK1.
+
+Will probably have to store as variables the indexes that match the regions. There are possibly 16+32+2 variables to store, so don't store them all as dataframes. Just use merged_data[index, ] to call each group.
+
+-Calculate average expression of just the counts within the regions.
+MIGHT require grouping by chromosome. If so... Maybe make them their own dataframes... is 16 too much?! Or perhaps I should just store the indexes as variables and use merged_data[indexes, ] to call each.
+From there, calculate the mean of all values that are numerical (or not 0, or not "NA" and not blank.)
+This code should help with that: subset(Gene_Name, Gene_Name != "" & Gene_Name !="NA")
+
+-Calculate avg expression of the counts NOT in the regions.
+Should be much easier. Save as a variable all the merged_data row indexes that do not match any of the 42 variables. So I should probably use some kind of exclusion or something.
+
+Must check if finding the average expression level of the genes is harder than it seems. I might have to do extra work before any of this to group them all by genes... but that will be difficult considering the lack of gene names that actually have count data associated with them. Perhaps either..
+Plan A: Write a function that finds all merged_data rows that have non-0, non-na, non-blank variables AND non...null count values. But what then? It might be a drastically diminished set of data.
+Plan B: Treat all the ones that parent to somethign else as one "gene." Since these are subfeatures of a gene_ID anyway. Maybe one gene_ID can be used to represent a gene..? Or maybe not, since gene names can be repeated.
+
+The progress on RStudio goes too fast for me to list here, so just check the .Rmd.
+
+As a last note: I used the first i data set for the time point counts. I should write this down on the final project and for Andreas

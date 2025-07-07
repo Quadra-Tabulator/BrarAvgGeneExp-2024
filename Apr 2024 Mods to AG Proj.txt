@@ -1,0 +1,42 @@
+Modifications to the project:
+
+.fa and .gff files are in Dr H's email. I have put them in HPC
+
+Don't trim anymore. It causes data loss and the Brar paper has no mention of it.
+
+Go directly to FastQC (quality checker)
+
+Use HISAT or STAR to align for this RNA-seq instead of BWA.
+
+After that I presume is where I download all the data and work on it via RStudio. I can probably download them to the external SSD.
+
+
+
+
+
+
+
+Note to self: Workflow for FASTQ alignments (from HW2)
+
+load modules, get all the .fastq files (from SRR on NCBI GEO. get list if needed)
+FastQC
+STAR to align (uses .fa file directly and has higher rate than HISAT2)
+Download data and continue on RStudio
+
+
+
+
+
+
+Will likely have to either:
+1. within the sbatch, make the read align part a loop that runs STAR over all the files at once https://www.youtube.com/watch?v=9D1dToIQqls
+
+for file in *.fastq
+do
+STAR --runMode alignReads --genomeDir [whatever i made it. probably SK] --outSAMtype BAM SortedByCoordinate --readFilesIn ${file} --runThreadN 12 --outFileNamePrefix [whatever i set it to]
+done
+
+
+[Not using this] 2. add a line that writes the names of the .fastq files into a .txt file, and then make the output of the txt file become the input of the read align. (this seems much harder/more complex)
+
+outSAM type as BAM might save a lot of space

@@ -1,0 +1,20 @@
+--IDENTIFYING GENES--
+Counts table: First, use read.table() for the .txt table (from htseq output)
+Annotation table: then, read.delim() for .gff
+then, save as vectors gene IDs from count data (rownames), get gene IDs from annotation (a column from the gff dataframe)
+find common gene IDs by finding the intersection between these two vectors.
+then, filter the count data (table) for only the rows that match the common gene IDs.
+	* I should check if finding only the genes that are present in the gff is the correct way to "identify the genes"
+	* The GFFAnno$attributes has "ID=...;Name=.." or "ID=;Parent=". This ID/Name combo is what we need to match the count_data rownames (ID...) with.
+
+--CALCULATING AVG EXP LEVELS--
+Using another method.
+Not rowMeans. The format of the .txt output is just one expression value per row.
+
+--ADDITIONAL STUFF--
+
+"Identify all the genes in these regions" --> Need to make a dataframe or something that has the names of the genes that match. see above
+
+
+So Chat has already guessed some centromere positions. Let's come up with the code first, and then change it as required as I find the actual positions.
+ (Fixed. I hafve gotten the actual centromere positions, etc... So much has happened, so for further progress just read the .Rmd)

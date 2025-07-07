@@ -1,0 +1,796 @@
+---
+title: "DF-ReadcountsAvgGeneExp"
+author: "Darryl Fung"
+date: "2024-04-27"
+output: html_document
+---
+
+```{r}
+#install.packages('tidyverse')
+library(tidyverse) #for dplyr piping, purrr list mapping
+```
+
+
+
+```{r}
+## Loading count table from .txt file (output of bash htseq-count)
+count_data=read.table('SK1.AlignedReadCountsv2.txt', header=F, row.names=1)
+  #first column = rownames
+colnames(count_data)=('count')
+head(count_data)
+```
+
+```{r}
+DSSfilelist=list.files('./DDS-readcounts',full.names=T)
+
+
+for (file in 1:length(DSSfilelist)) {
+  df=read.table(DSSfilelist[file],header=F,row.names=1)
+  index=sprintf("%02d", file)
+  assign(paste0('count_data_',index),df)
+    # sprintf() is used as a second layer of iterators. If the initial file iterator is less than 2 digits long, ensure it is 2 digits long by padding it out with a 0. (i.e. 1 and 2 become 01 and 02) And ensure that the output iterator is still an integer.
+      # done for easier alphabetical ordering later
+    # assign() seems easier when saving the df with a constantly-changing name.
+    # paste0() has no separators. so we'll get something like count_data_1
+}
+```
+
+```{r}
+## custom function: set the colname of count_data 01 to 12 to "count"
+# where x is a dataframe
+ColtoCount=function(x) {
+  colnames(x)='count'
+  return(x)
+}
+
+count_data_01=ColtoCount(count_data_01)
+count_data_02=ColtoCount(count_data_02)
+count_data_03=ColtoCount(count_data_03)
+count_data_04=ColtoCount(count_data_04)
+count_data_05=ColtoCount(count_data_05)
+count_data_06=ColtoCount(count_data_06)
+count_data_07=ColtoCount(count_data_07)
+count_data_08=ColtoCount(count_data_08)
+count_data_09=ColtoCount(count_data_09)
+count_data_10=ColtoCount(count_data_10)
+count_data_11=ColtoCount(count_data_11)
+count_data_12=ColtoCount(count_data_12)
+
+
+```
+
+
+```{r}
+## Loading annotations from GFF file
+GFFAnno=read.delim('SK1.all_feature.gff',
+                   header=F,
+                   stringsAsFactors=F)
+colnames(GFFAnno)=c('chromosome','source','type','start','end','score','strand','phase','attributes')
+head(GFFAnno)
+```
+```{r}
+## The GFFAnno attributes column has "ID=...;Name=.." or "ID=;Parent=".
+# Let's extract the ID=... part only from GFFAnno$attributes via a new vector.
+
+
+Gene_ID=sub("ID=([^:;]+).*", "\\1", GFFAnno$attributes)
+  # We capture ("find") items that match a beginning, middle, and end
+  # Beginning: "ID=" -- We begin capturing when "ID=" is present.
+
+
+# COMPLETE THIS COMMENT LATER
+
+
+  # \\1 means to replace the current item inside the vector with what we just
+  # captured. I believe this works similar to iterating loops.
+
+# Match gene IDs with row names of count_data
+common_gene_ids=intersect(Gene_ID, rownames(count_data))
+
+# Filter count data for common gene IDs
+common_genes_count=count_data[common_gene_ids, ]
+
+```
+
+All the genes present
+```{r}
+## Identifying genes.
+## Extracting only gene NAMES
+Gene_Name = sub(".*;Name=([^:;]+).*|.*$", "\\1", GFFAnno$attributes)
+Gene_Name.noempty = subset(Gene_Name, Gene_Name != "" & Gene_Name !="NA")
+  # remove all the empty spaces from those rows who were lacking gene names.
+  # This is necessary because some had Parent instead of Name
+  # Some were NA values that were not removable with na.remove, so instead
+    # I also manually removed those who were a string "NA"
+# head(Gene_Name.noempty,25)
+
+GenesPresentAlphabetical = sort(unique(Gene_Name.noempty))
+  # These are all the genes present in our dataset.
+head(GenesPresentAlphabetical)
+tail(GenesPresentAlphabetical)
+
+write.table(GenesPresentAlphabetical,file='Genes-Present.txt')
+  # output to .txt file
+
+GFFAnno$Gene_Name = Gene_Name
+ # Add the gene Names to GFF.
+```
+
+```{r}
+# head(common_gene_ids)
+# count_data$count
+
+```
+
+## Extracting and adding Gene Name and Gene ID to GFFAnno
+So we can relate gene names to ID's (the count table has gene ID's).
+```{r}
+##Attempt 3: Part 1. Success. If has Parent= instead of Name=, instead of giving it a Gene_Name, we give it a Gene_ID that corresponds to what its ID= reads.
+# This way, they are still referred back to their correct parent ID.
+
+# the Names rows have the gene id directly.
+
+# Create a vector to store the mapped original gene IDs
+mapped_gene_ids <- character(length = nrow(GFFAnno))
+
+# Iterate over each row of GFFAnno
+for (i in seq_len(nrow(GFFAnno))) {
+    # Extract the attributes for the current row
+    attributes <- GFFAnno$attributes[i]
+    # Check if the attributes contain "Parent="
+    if ("Parent=" %in% attributes) {
+        # Extract the gene ID from the "Parent=" attribute
+        parent_gene_id <- sub(".*Parent=([^:;]+).*", "\\1", attributes)
+        # Map the parent gene ID to the original gene ID
+        original_gene_id <- Gene_ID[parent_gene_id == Gene_ID]
+        # Store the mapped original gene ID
+        mapped_gene_ids[i] <- original_gene_id
+    } else {
+        # If "Parent=" is not found, use the original gene ID
+        mapped_gene_ids[i] <- Gene_ID[i]
+    }
+}
+
+# Add the mapped gene IDs as a new column to GFFAnno
+GFFAnno$Mapped_Gene_ID <- mapped_gene_ids
+
+head(GFFAnno)
+```
+```{r}
+## Merge count_data onto GFFAnno in an attempt to get something that can 
+## relate counts to gene names easily.
+
+  ## This didn't quite work... For some reason, there are no rows that overlap
+    # in both name and ID...
+
+## LEFT JOIN (aka Keep GFFAnno's extra rows)
+merged_data <- merge(GFFAnno, count_data, by.x = "Mapped_Gene_ID", by.y = "row.names", all.x = TRUE)
+
+
+id.name.count <- merged_data[, c("Mapped_Gene_ID","Gene_Name", "count")]
+# ID, name, and count only
+id.name.count[1459:1466,]
+
+
+```
+
+Merged data now has everything: GFF, counts, and Name/Parents added on too.
+Due to the nature of the data, a lot of rows are left blank. But if need be,
+I can probably port the merged_data$Gene_Name back over to count_data for only
+those rows who actually have count_data values.
+
+
+```{r}
+
+# merged_data[129:131,]
+```
+
+
+-Find the genes that fit within the pericentromeres, subtelomeres, and ribosomal.
+
+"This means (1) get the coordinates of the CENs and the rDNA and (2) define the start and end coordinates for each chromosome and (3) use these coordinates to calculate the coordinate windows you want to analyze (this can be done by hand or in excel if you don't know how to write the R script)." -Andreas
+Current challenge: Find out how to define start and end coordinates. Andreas says it can be done from the GFF file alone. (Use GFFAnno because it's organized by chromosome)
+
+## Making dataframe of chromosome lengths.
+```{r}
+chromosome_lengths = data.frame(chromosome = c('chrI','chrII','chrIII','chrIV','chrV',
+             'chrVI','chrVII','chrVIII','chrIX','chrX',
+             'chrXI','chrXII','chrXIII','chrXIV','chrXV',
+             'chrXVI'),
+             len = c(230218,813184,316620,1531933,576874,270161,1090940,562643,439888,
+745751,
+666816,1078177,
+924431,784333,
+1091291,
+948066))
+chromosome_lengths
+# information from the SGD and associated websites
+```
+
+Note: Finding 25kb (25,000) +/- will require finding 25kb upstream the start and 25kb downstream the end.
+
+
+```{r}
+## Chromosome start & end
+ChromoStartEnd=GFFAnno %>%
+  group_by(chromosome)
+# groups by chromosome. GFFAnno is already grouped by chromosome, but let's do this JUST IN CASE there are out-of-place regions.
+# For some reason this doesn't work on merged_data...
+  # Not sure why, but I did not have enough time to figure out why within my original project deadline
+tail(ChromoStartEnd)
+```
+
+
+Pericentromeres will be hardest, as I need to figure out how to find the CEN. But it's just one region per chromosome.
+This data was already provided in the GFF file in the form of CEN1-16.
+The one for SK1 (this genome) differs from the coordinates on S.c. database, probably because it's a different genome from the standard one.
+
+
+```{r}
+## Saving all centromere start and end coordinates.
+# In retrospect, this could have been done as a DATAFRAME.
+# 16 entries. Each entry in the list will have two items: start and end.
+# Each entry corresponds to the centromere of a chromosome (chrI to XVI; 1 - 16)
+
+
+chromosome_centromerepos=merged_data[1:16,]
+
+# Custom function to extract numeric values from Mapped_Gene_ID
+extract_numeric=function(mapped_gene_id) {
+  # Extract the numeric part from the Mapped_Gene_ID
+  numeric_part=gsub("CEN", "", mapped_gene_id)
+  # Convert to numeric
+  as.numeric(numeric_part)
+}
+
+# Reorder rows based on numeric values extracted from Mapped_Gene_ID
+CentromerePosFinal=chromosome_centromerepos[order(sapply(chromosome_centromerepos$Mapped_Gene_ID,
+                                                                      extract_numeric)
+                                                                ),
+                                                          ]
+
+# Print the reordered dataframe
+CentromerePosFinal
+
+```
+
+```{r}
+## Defining Pericentromeric region start and end for each chromosome.
+## Making the pericentromeric regions a DATAFRAME might be more readable for future functions.
+
+PericentromericRegions=data.frame(Chromosome=c('chrI','chrII','chrIII','chrIV','chrV',
+             'chrVI','chrVII','chrVIII','chrIX','chrX',
+             'chrXI','chrXII','chrXIII','chrXIV','chrXV',
+             'chrXVI'),
+            Peristart=vector(length=16),
+             Periend=vector(length=16)
+)
+
+window_size = 25000
+  # although we want 25000 L&R, we'll be using this to search on each side.
+  # Centromeres are not just one point.
+
+## NOTE: Although centromeres are provided on SGD as + or - strand, they are all
+  # provided in the same format where the start coord is smaller than end coord.
+  # So, we don't need to flip anything for - strand centromeres.
+
+for (i in 1:16) {
+    centromere_start=CentromerePosFinal$start[i]
+    centromere_end=CentromerePosFinal$end[i]
+
+    pericentromeric_start=centromere_start - window_size
+      # 25k bases upstream of centromere's start
+    pericentromeric_end=centromere_end + window_size
+      # 25k bases downstream of centromere's end
+    PericentromericRegions$Peristart[i]=pericentromeric_start
+    PericentromericRegions$Periend[i]=pericentromeric_end
+}
+
+PericentromericRegions
+
+
+```
+# Genes within pericentromeric regions
+```{r}
+merged_peri=merged_data %>%
+  inner_join(PericentromericRegions, by = c("chromosome" = "Chromosome"))
+filtered_data_peri=merged_peri %>%
+  filter(start >= Peristart & end <= Periend)
+
+GenesinPeri=unique(filtered_data_peri$Gene_Name)
+GenesinPeri.noempty=subset(GenesinPeri, GenesinPeri != "" & GenesinPeri !="NA")
+length(GenesinPeri.noempty)
+
+write.table(GenesinPeri.noempty,file='Genes-in-PericentromericRegions.txt')
+
+
+```
+
+
+
+Subtelomeres should be easiest, as I just have to find those within the first 20k and the last 20k on each of the 16 chromosomes (32 total)
+# Defining subtelomeric regions for each chromosome
+```{r}
+SubtelomericRegions=data.frame(
+  Chromosome = c('chrI','chrII','chrIII','chrIV','chrV',
+                 'chrVI','chrVII','chrVIII','chrIX','chrX',
+                 'chrXI','chrXII','chrXIII','chrXIV','chrXV',
+                 'chrXVI'),
+  Head.Start=rep(0, 16),
+  Head.End=rep(20000, 16),
+  Tail.Start=chromosome_lengths$len - 20000,
+  Tail.End=chromosome_lengths$len
+)
+
+head(SubtelomericRegions)
+
+# Found it. The same chromosomes pages on SGD mention the length.
+# See creation of chromosome_lengths dataframe.
+```
+Subtelomeric regions at the beginning are 0 to 20,000 on each chromosome. (head)
+They are also the Tail start to Tail end of each chromosome. (tail)
+
+## Genes within subtelomeric regions
+```{r}
+# Inner join with SubtelomericRegions
+merged_subtelomeric <- merged_data %>%
+  inner_join(SubtelomericRegions, by = c("chromosome" = "Chromosome"))
+
+# Filter for genes within the specified ranges
+filter_subtel_head <- merged_subtelomeric %>%
+  filter((start >= Head.Start & end <= Head.End))
+
+filter_subtel_tail <- merged_subtelomeric %>%
+  filter(start >= Tail.Start & end <= Tail.End)
+
+filtered_data_subtelomeric <- rbind(filter_subtel_head, filter_subtel_tail)
+
+# Extract unique non-empty Gene_Name values
+Genes_in_Subtelomeric <- unique(filtered_data_subtelomeric$Gene_Name)
+GenesinSub.noempty <- subset(Genes_in_Subtelomeric, Genes_in_Subtelomeric != "" & Genes_in_Subtelomeric != "NA")
+
+# Write the results to a file
+write.table(GenesinSub.noempty, file = 'Genes-in-SubtelomericRegions.txt')
+
+# Print the length of the result
+length(GenesinSub.noempty)
+
+
+```
+Ribosomal DNA should be about middle difficulty. Find where the rDNA locus is on chromosome XII (12) of Sc SK1.
+"The rRNA of Saccharomyces cerevisiae is encoded by the ribosomal RNA genes called RDN1"
+    https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1474064/ Kim et al, 2006
+RDN1 is a gene group consisting of two features (two groups):
+RDN18-1 at 455933-457732
+RDN18-2 at 465070-466869
+    https://www.yeastgenome.org/contig/Chromosome_XII
+Regions surrounding ribosomal DNA are +/-50kb i.e. +/-50,000 bases
+
+
+
+## Defining ribosomal regions +/-50,000 bases from the two regions.
+```{r}
+
+# i.e. 50k less than start, 50k more than end of rDNA locus
+window_size2=50000
+RibosomalRegions = data.frame(Chromosome=rep('chrXII',2),
+                              Region=c('RDN18-1','RDN18-2'),
+                              Ribostart=c(455933-window_size2,465070-window_size2),
+                              Riboend=c(457732+window_size2,466869+window_size2)
+                              )
+RibosomalRegions
+```
+# Genes within ribosomal
+```{r}
+## Attempt 2. No joins needed since we're only looking at values in one chromo
+## Simply filter out matching three conditions for first region, and second region
+## then, combine together
+
+filtered_data_ribo_1 <- merged_data %>%
+  filter(
+    chromosome == 'chrXII',
+    start >= RibosomalRegions$Ribostart[1],
+    end <= RibosomalRegions$Riboend[1]
+  )
+
+
+filtered_data_ribo_2 <- merged_data %>%
+  filter(
+    chromosome == 'chrXII',
+    start >= RibosomalRegions$Ribostart[2],
+    end <= RibosomalRegions$Riboend[2]
+  )
+
+
+filtered_data_ribo.combined <- rbind(filtered_data_ribo_1, filtered_data_ribo_2)
+
+
+GenesinRibo <- unique(filtered_data_ribo.combined$Gene_Name)
+GenesinRibo.noempty <- subset(GenesinRibo, GenesinRibo != "" & GenesinRibo != "NA")
+
+
+write.table(GenesinRibo.noempty, file = 'Genes-in-RibosomalRegions.txt')
+length(GenesinRibo.noempty)
+
+```
+
+# Making a gene list of all the genes in the three regions
+I can likely just concatenate GenesinPeri.noempty, GenesinSub.noempty, and GenesinRibo.noempty
+and find unique() of this concatenation. --> Genes that are in the 3 regions.
+
+```{r}
+Genesin3Regions=unique(c(GenesinPeri.noempty,
+                         GenesinSub.noempty,
+                         GenesinRibo.noempty))
+
+length(Genesin3Regions)
+write.table(Genesin3Regions,file='Genesin3Regions.txt')
+```
+I have stored the genes + counts that fall under the peri, sub, and ribo regions
+as dataframes.
+These are:
+filtered_data_peri,
+filtered_data_subtelomeric,
+filtered_data_ribo.combined
+When calculating avg gene exps, can call the rows corresponding to gene names.
+```{r}
+## REMINDER: pipeline was merged --> filtered.
+# filtered is the one that actually contains those within the regions.
+
+
+# filtered_data_peri$count
+# filtered_data_subtelomeric$count
+# filtered_data_ribo.combined$count
+```
+
+```{r}
+# Upon loading v2 of the alignments, which had -type gene argument in ht-seq,
+# There are finally things with gene names that have actual counts!
+# On top of that, only the ones with names have counts.
+
+
+## Testing below. Unique count amounts for those with Names, and those without.
+# unique((merged_data[merged_data$Gene_Name!="",])$count)
+  # The ones with names mostly have counts.
+# unique((merged_data[merged_data$Gene_Name=="",])$count)
+  # The ones without names do not have counts. Can ignore these subfeatures.
+```
+
+
+
+```{r}
+# Goal: Group the datasets based on gene. Or for each gene, iterate through all the non-NA, non-empty counts and add them to a vector, then calculate the average of them. Add this to a growing column in a dataframe. I should have in the dataframe a column of all the genes. i.e. column Genes=Genesin3Regions and column avgexplvl for all the average counts for each gene.
+
+# Need to find a way to make an iterable way (for gene in Genesin3Regions) to filter all the merged data (because we need to search from ALL across the regions. Non-region ones will also search here as the filtering options will take care of it.) for all rows that match that Gene_Name.
+
+
+# Genesin3Regions
+
+# For genes in Genesin3regions... something something grab the row whose Gene_Name matches it
+
+
+G3Rcounts <- numeric(length(Genesin3Regions))  # Initialize a numeric vector to store counts
+
+# Loop through each gene in Genesin3Regions
+for (i in seq_along(Genesin3Regions)) {
+  # Subset merged_data to rows where Gene_Name matches the current gene
+  gene_subset <- merged_data[merged_data$Gene_Name == Genesin3Regions[i], ]
+  
+  # Check if any rows were found for the current gene
+  if (nrow(gene_subset) > 0) {
+    # If rows were found, extract the count value (assuming count is numeric)
+    G3Rcounts[i] <- gene_subset$count[1]  # Assuming there's only one count per gene
+  } else {
+    # If no rows were found, set count to NA
+    G3Rcounts[i] <- NA
+  }
+}
+
+G3Rcounts
+
+## These are the expression levels for all the genes. I can calculate the average of all of these by filtering merged_genes dataframe for all the rows whose $count matches G3Rcounts. (filtered_data_G3R)
+
+
+
+```
+
+
+## Mapping the count datas according to gene & time points A-V
+
+```{r}
+merged_data=merged_data[, !(names(merged_data) == "count")]
+## Remove count. That was not correct, but everything else is.
+## The actual counts are in MappedTimePoints below.
+```
+
+
+```{r}
+
+## NOTE ALSO: 01 is technically not part of the time course. So use 02 to 12. ##
+
+# I notice the same gene ID's are present acros all the 12 separate counts.
+# I should map the gene ID's from each one into like a dataframe
+# say, gene ID SK1...010 should have its $count from 02, 03, ... 12 mapped on a dataframe whose columns read A, B, D, E, F, G, I (first), K, L, O, V.
+
+
+# rows will be populated by gene ID's
+# the rownames for all count_data and the count_data 01 to 12 are all equivalent
+# I think the countdatas 01 to 12 were what I was supposed to do all along.
+# Can I cbind them.. YES!!! This is what I was looking for all along.
+# rownames(count_data)
+
+
+MappedTimePoints=cbind(count_data_02,count_data_03,count_data_04,count_data_05,
+                       count_data_06,count_data_07,count_data_08,count_data_09,
+                       count_data_10,count_data_11,count_data_12)
+colnames(MappedTimePoints)=c('A','B','D','E','F','G','I (first)','K','L','O','V')
+head(MappedTimePoints)
+
+## MappedTimePoints, are the expressions for each ID across each of the time points.
+## Now, for avg GENE exp, I need to group together ID's based on their gene.
+
+
+```
+
+```{r}
+# Custom function NormalizerV2:
+# Version 2: inputvector = vector for which all values you'd like to be normalized
+# 0th step: create empty vector to add into.
+# First, take mean and sd of the column, save as variables.
+# Second, for loop --> For each value inside, subtract it from mean and sd (calculated earlier)
+# Save these in the empty vector. This will be added to the dataframe outside of the function.
+
+NormalizerV2 = function(inputvector) {
+  normalized_column=numeric(0)
+  mean_column = mean(inputvector)
+  sd_column = sd(inputvector)
+  
+  for (y in 1:length(inputvector)) {  #y is the position in the column.
+    normalized_value = (inputvector[y] - mean_column) / sd_column
+    normalized_column[y] = normalized_value
+  } 
+  
+  normalized_column  
+}
+
+MappedTimePoints.normalized=as.data.frame(t(apply(MappedTimePoints, MARGIN=1, NormalizerV2)))
+colnames(MappedTimePoints.normalized)=c('A','B','D','E','F','G','I (first)','K','L','O','V')
+  # margin=1 for applying to rows instead of columns.
+  # because we want to treat each row as its own vector (as they should represent one gene ID, and later on one gene name)
+# With this normalization, huge outliers will be a bit easier to see. Most values will now be in a range of -1 to 1.
+head(MappedTimePoints.normalized)
+```
+
+
+```{r}
+## Relating the Gene Name to the timepoints so we can order based on gene later
+  # and calculate the avg gene exp for all rows under the same Gene_Name
+# Add a new column 'Gene_Name' to MappedTimePoints.normalized
+MappedTimePoints.normalized$Gene_Name=NA
+
+# Iterate over each row of MappedTimePoints
+for (row in 1:nrow(MappedTimePoints.normalized)) {
+  # Get the row name
+  row_name=rownames(MappedTimePoints.normalized)[row]
+  
+  # Find the index in merged_data$Mapped_Gene_ID that matches the row name
+  id.index=which(merged_data$Mapped_Gene_ID == row_name)[1]
+  
+  # If id.index exists, assign the corresponding Gene_Name to MappedTimePoints.normalized
+  if (!is.na(id.index)) {
+    MappedTimePoints.normalized$Gene_Name[row] <- merged_data$Gene_Name[id.index]
+  }
+}
+
+MappedTimePoints.clean=
+  MappedTimePoints.normalized[which(MappedTimePoints.normalized$Gene_Name!='NA'),]
+# which(MappedTimePoints.clean$Gene_Name=='NA')
+ #Discarded all gene ID's with no name
+head(MappedTimePoints.clean)
+```
+
+```{r}
+## Ordering MappedTimePoints.clean based on Gene_Name
+## Note: Ordering rows based on Gene_Name alphabetically will naturally keep
+  # those with the same gene name together (i.e. under the same gene)
+
+MappedTimePoints.ordered=arrange(MappedTimePoints.clean,Gene_Name)
+head(MappedTimePoints.ordered)
+```
+
+```{r}
+MappedTimePoints.ordered=group_by(MappedTimePoints.ordered,Gene_Name)
+# Updated the same dataframe. Now it has grouping.
+  # after organizing, group together the same Gene_Name ones so I can apply
+  # further functions to each group instead.
+
+dim(MappedTimePoints.ordered)
+```
+
+```{r}
+# summarize(MappedTimePoints.ordered,across(.cols = c(1:11), .fns = mean, na.rm = TRUE))
+  # across is deprecated, I was suggested to use an anonymous func instead
+AVGEXPLVL.ALL=summarize(MappedTimePoints.ordered,across(.cols = c(1:11),
+                                          .fns = \(x) mean(x, na.rm = TRUE)))
+
+head(AVGEXPLVL.ALL)
+# This is for ALL genes. So we should filter out for Gene_Names that fit within the three regions (Genesin3Regions)...
+#and for those that do not fit within the 3 regions (the opposite)
+```
+AVGEXPLVL.ALL is an organized list of each gene's average exp level across the
+11 meiotic time points.
+But we still need to filter and plot the ones who are within the three regions.
+
+
+# Filtering AVGEXPLVL.ALL for genes within the 3 regions.
+"Then you determine the average expression level for all these genes in the list at each time point using the mRNA-seq dataset. This will give you a number for each time point that you then plot as a graph with time on the x and expression level on the y axis."
+```{r}
+# Let's use the 3 regions gene list we made earlier.
+# I need to find all the rows in AVGEXPLVL.ALL that match Genesin3Regions
+  # note: 1st %in% 2nd. looking for things in 1st that are in 2nd
+AVGEXPLVL.3Regions=AVGEXPLVL.ALL[AVGEXPLVL.ALL$Gene_Name %in% Genesin3Regions,]
+
+# AVGEXPLVL.3Regions.df=as.data.frame(AVGEXPLVL.3Regions)
+# rownames(AVGEXPLVL.3Regions.df)=AVGEXPLVL.3Regions$Gene_Name
+# AVGEXPLVL.3Regions.df=AVGEXPLVL.3Regions.df[, -1]
+#   # made it a dataframe, changed the first column (Gene_Name) to be rownames
+
+head(AVGEXPLVL.3Regions)
+
+write.csv(AVGEXPLVL.3Regions,file='AvgExpLevel.3Regions.csv')
+```
+
+# Filtering AVGEXPLVL.ALL for genes NOT in the 3 regions.
+Before we plot, Calculate avg expression of the counts NOT in the regions. (already calculated, so just filter them out)
+```{r}
+AVGEXPLVL.Ctrl=AVGEXPLVL.ALL[!(AVGEXPLVL.ALL$Gene_Name %in% Genesin3Regions),]
+  # negated the %in% pattern searching. so this is just the inverse
+
+# AVGEXPLVL.Ctrl.df=as.data.frame(AVGEXPLVL.Ctrl)
+# rownames(AVGEXPLVL.Ctrl.df)=AVGEXPLVL.Ctrl$Gene_Name
+# AVGEXPLVL.Ctrl.df=AVGEXPLVL.Ctrl.df[, -1]
+
+
+head(AVGEXPLVL.Ctrl)
+
+write.csv(AVGEXPLVL.Ctrl,file='AvgExpLevel.Control.csv')
+```
+# Plotting avg exp lvl across time points for those within 3 regions
+```{r}
+AEL.3R.long=tidyr::pivot_longer(AVGEXPLVL.3Regions,
+             cols = -Gene_Name,
+             names_to = 'Time_Point',
+             values_to='Expression_Level')
+  # doesn't pivot the gene name.
+
+
+
+Violin3Regions = ggplot(AEL.3R.long, aes(x = Time_Point, y = Expression_Level, fill = as.factor(Time_Point))) +
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.05) +
+  theme_minimal() +
+  labs(x = "Time Point", y = "Expression Level") +
+  scale_fill_discrete(name = "Time Point") +
+  ggtitle("Avg Gene Exp Over Time: Peri, Subtelo, Ribo Regions") +
+  theme_light()
+
+Violin3Regions
+
+# ggsave("Violin3Regions.png", plot = Violin3Regions,
+#        width = 1280, height = 960,
+#        units = "px")
+```
+(reminder, A is the beginning at 0 hours, and V is the end at 24 hours)
+I did normalization in an effort to make the data a little easier to see, so that's why the data is on a scale of -1 to 1 instead of the actual values. The actual count values ranged anywhere from as little as 10 to as high as 150 or more.
+
+Interpretation: Although not showing any specific genes (there would be too many to count anyway -- there are over 570), we can see patterns from genes within the three special regions.
+Within the three special regions, a high amount of genes exhibit notably low expression at the start of the time course. This makes sense, as the meiosis has just begun. The lack of expression in the beginning of meiosis suggests the genes in the three regions are not master regulators.
+As early as the B time point, 0.033 hours in (just two minutes), we can see the expression of these genes begin to rise. They reach a peak at 0.5 hours in, where there is a lot of overexpression in these genes.
+The expression levels drop down and fluctuate a bit until 24 hours in, where expression rises but not to the point of the overexpression peak early on.
+
+
+
+# Plotting avg exp lvl for the Control (time points for those NOT in 3 regions)
+```{r}
+AEL.Ctrl.long=tidyr::pivot_longer(AVGEXPLVL.Ctrl,
+             cols = -Gene_Name,
+             names_to = 'Time_Point',
+             values_to='Expression_Level')
+  # doesn't pivot the gene name.
+
+
+
+ViolinControl = ggplot(AEL.Ctrl.long, aes(x = Time_Point, y = Expression_Level, fill = as.factor(Time_Point))) +
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.017) +
+  theme_minimal() +
+  labs(x = "Time Point", y = "Expression Level") +
+  scale_fill_discrete(name = "Time Point") +
+  ggtitle("Avg Gene Exp Over Time: Control Group") +
+  theme_light()
+
+ViolinControl
+
+# ggsave("ViolinControl.png", plot = ViolinControl,
+#        width = 6, height = 4, units = "in")
+```
+Interpretation: Compared to the ones in the three regions, the control genes have a pretty similar distribution across the time points. The biggest difference I see is in point D, where more of the control genes exhibit the nearly-abnormally high expression. And the 24-hour point (V) has genes with slightly higher expression than in the three regions.
+UPDATED NOTES JUNE 2024:
+Additionally, there appear to be some outlier genes with massive underexpression (point D and I)
+It should also be noted that in order to properly fit the datapoints in the screen, the plot for control required a much smaller bin width (0.017) compared to the 3 regions (0.05). Because of this, it can be concluded that there was an intensely larger amount of genes in the control across all patterns and time points compared to the 3 regions of interest.
+
+
+(I've forgone using ggsave for image rendering because they look much uglier than the in-window previews.)
+
+
+
+# Avg exp lvl of individual regions
+
+```{r}
+AVGEXPLVL.Peri=AVGEXPLVL.ALL[AVGEXPLVL.ALL$Gene_Name %in% GenesinPeri.noempty,]
+AVGEXPLVL.Sub=AVGEXPLVL.ALL[AVGEXPLVL.ALL$Gene_Name %in% Genes_in_Subtelomeric,]
+AVGEXPLVL.Ribo=AVGEXPLVL.ALL[AVGEXPLVL.ALL$Gene_Name %in% GenesinRibo.noempty,]
+```
+
+
+
+```{r}
+AEL.Peri.long=tidyr::pivot_longer(AVGEXPLVL.Peri,
+             cols = -Gene_Name,
+             names_to = 'Time_Point',
+             values_to='Expression_Level')
+
+
+
+ViolinPeri = ggplot(AEL.Peri.long, aes(x = Time_Point, y = Expression_Level, fill = as.factor(Time_Point))) +
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.05) +
+  theme_minimal() +
+  labs(x = "Time Point", y = "Expression Level") +
+  scale_fill_discrete(name = "Time Point") +
+  ggtitle("Avg Gene Exp Over Time: Pericentromeric region") +
+  theme_light()
+
+ViolinPeri
+```
+The pericentromeric region takes up the majority of the combined 3 regions' avg gene exp. It largely follows the same pattern of the combined plot, with minimal differences in gene amount (plot width)
+
+```{r}
+AEL.Sub.long=tidyr::pivot_longer(AVGEXPLVL.Sub,
+             cols = -Gene_Name,
+             names_to = 'Time_Point',
+             values_to='Expression_Level')
+
+
+
+ViolinSub = ggplot(AEL.Sub.long, aes(x = Time_Point, y = Expression_Level, fill = as.factor(Time_Point))) +
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.05) +
+  theme_minimal() +
+  labs(x = "Time Point", y = "Expression Level") +
+  scale_fill_discrete(name = "Time Point") +
+  ggtitle("Avg Gene Exp Over Time: Subtelomeric region") +
+  theme_light()
+
+ViolinSub
+```
+The subtelomeric region avg gene exps are very sparse compared to those of the pericentromeric region. The rising-falling expression pattern is largely the same, but most of the genes accumulate at a greater underexpression (more negative number, shifted downwards) than that of the combined plot. This can be seen prominently on time points A and I. The contribution of the subtelomeric regions' avg gene exp on the combined plot are suspected to be minimal.
+
+
+```{r}
+AEL.Ribo.long=tidyr::pivot_longer(AVGEXPLVL.Ribo,
+             cols = -Gene_Name,
+             names_to = 'Time_Point',
+             values_to='Expression_Level')
+
+
+
+ViolinRibo = ggplot(AEL.Ribo.long, aes(x = Time_Point, y = Expression_Level, fill = as.factor(Time_Point))) +
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.05) +
+  theme_minimal() +
+  labs(x = "Time Point", y = "Expression Level") +
+  scale_fill_discrete(name = "Time Point") +
+  ggtitle("Avg Gene Exp Over Time: Ribosomal region") +
+  theme_light()
+
+ViolinRibo
+```
+Like the subtelomeric region, the ribosomal region avg gene exps are very sparse and likely contributes very little to the combined region plot. Curiously, the shifts in largest accumulations are shifted upwards (greater expressions). (Visible on time points A, B, and I)
+This is the opposite compared to the subtelomeric regions. I suspect that the subtelomeric and ribosomal regions' effects on the combined 3 regions' avg gene exp cancel each other out somehow.
+
